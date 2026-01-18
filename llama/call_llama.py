@@ -10,6 +10,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 from llama.memory_support.memory_support import Memory_support
 from llama.RAG.BuildVectorStore import PDFVectorStore
+from llama.RAG.rank_context import RankContext
 
 
 class call_llama:
@@ -37,19 +38,24 @@ class call_llama:
 
         # Carregar embeddings (HuggingFace)
         print("🔍 Carregando modelo de embeddings...")
-        self.embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+
+        # Instanciar o suporte de Re Rank do RAG
+        print(" Carregando sistema de Re Rank...")
+        self.rank_context = RankContext(
+            model = "BAAI/bge-reranker-large"
+        )
 
         # Instanciar suporte de memória (nova API)
         print("🧠 Iniciando sistema de memória...")
         self.memory_support = Memory_support(
             db_path=self.memory_path,
-            embedding_model=self.embedding_model,
+            embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2", model_kwargs={'device': 'cuda'}),
             threshold_distance=0.45,  # ajuste fino recomendado: 0.35–0.55
             max_memories=300
         )
 
         #Instanciar suporte de RAG
-        print("Iniciando sistema de RAG...")
+        print("📚 Iniciando sistema de RAG...")
         self.rag_support = PDFVectorStore(
             db_path = "llama/RAG/db"
         )
@@ -98,14 +104,17 @@ class call_llama:
 
         relevant_chunks = self.db_rag.similarity_search(user, k)
 
-        rag_block = ""
+        reranked_docs = self.rank_context.call_rank(query=user, documents = relevant_chunks)
 
-        for i in relevant_chunks:
-            rag_block+= f"{i.page_content}\n"
+        count = 0
+        for i in reranked_docs:
+            count +=1 
+            print(f"Chunk num {count}")
+            print(i)
 
-        print(f"RaGBLOCKKKKK ------- {rag_block}")
+        #print(f"RaGBLOCKKKKK ------- {reranked_docs}")
 
-        return rag_block
+        return reranked_docs
 
     # -------------------------------------------------------------------------
     #   MONTA PROMPT E GERA RESPOSTA
@@ -115,23 +124,35 @@ class call_llama:
         Structura o prompt com blocos claros, adicionando memória relevante.
         """
         memory_block = self.memory_support.mount_prompt_memory(user, k=4)
-        rag_block = self._extract_info_chunks(user, k=4)
+        rag_block = self._extract_info_chunks(user, k=20)
 
         prompt = f"""
-### SYSTEM
-{system}
-
-### CONTEXT MEMORY (long-term)
-{memory_block if memory_block.strip() else "[Nenhuma memória relevante encontrada]"}
-
-### CONTEXT RAG
-{rag_block if rag_block.strip() else "[Nenhum documento relevante foi encontrado]"}
-
-### USER
-{user}
-
-### ASSISTANT
-"""
+            <|begin_of_text|>
+            <|start_header_id|>system<|end_header_id|>
+            
+            Você é um **Especialista em GRC-RD (Governança, Risco, Conformidade e Resiliência Digital)**. Sua missão é atuar como um chatbot de alta precisão, fornecendo respostas  **autoritárias e concisas** em **formato de texto coeso (prosa)**.
+            Sua única fonte de verdade é o CONTEXTO RAG fornecido no bloco <CONTEXT_RAG>.
+            
+            **REGRAS CRÍTICAS DE GERAÇÃO:**
+            1. **BASE EXCLUSIVA:** Utilize **APENAS** o conteúdo do bloco <CONTEXT_RAG> para formular sua resposta. Não use conhecimento prévio.
+            2. **CITAÇÃO OBRIGATÓRIA:** PARA CADA FRASE OU TRECHO de informação extraído do <CONTEXT_RAG>, inclua a citação completa e formatada imediatamente no final, se não utilizar nada do <CONTEXT_RAG> fale na resposta que não foi utilizado nada do <CONTEXT_RAG>: ****.
+            3. **FORMATO E SÍNTESE:** A resposta deve ser uma **síntese em prosa fluida**, sem repetir cabeçalhos do documento de origem. Responda diretamente à pergunta.
+            4. **INFORMAÇÃO INSUFICIENTE (FALLBACK):** Se a pergunta não puder ser totalmente respondida com o conteúdo do <CONTEXT_RAG>, você **DEVE** parar a geração imediatamente após              a frase de *fallback*.
+            5. **REDUNDANCIA**: NÃO seja redundante na sua resposta, ou seja, ficar repetindo que ja foi falado por você na resposta.
+            
+            <CONTEXT_MEMORY>
+            {memory_block if memory_block.strip() else "[Nenhuma memória relevante encontrada]"}
+            </CONTEXT_MEMORY>
+            
+            <CONTEXT_RAG>
+            {rag_block if rag_block.strip() else "[Nenhum documento relevante foi encontrado.]"}
+            </CONTEXT_RAG>
+            
+            <|end_header_id|>user<|end_header_id|>
+            {user}
+            
+            <|start_header_id|>assistant<|end_header_id|>
+            """
         return prompt
 
     # -------------------------------------------------------------------------
@@ -139,6 +160,8 @@ class call_llama:
     # -------------------------------------------------------------------------
     def invoke(self, system: str, user: str, temp=0.3, max_tokens=512, top_p=0.95, top_k=40):
         prompt = self.build_prompt(system, user)
+
+        #print(prompt)
 
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
 
