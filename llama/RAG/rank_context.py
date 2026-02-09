@@ -1,48 +1,47 @@
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-import pandas as pd
 import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
 
 class RankContext:
-    def __init__(self, model, top_n = 4):
+
+    def __init__(self, model, top_n=6):
+
+        self.device = torch.device("cuda")
 
         self.tokenizer = AutoTokenizer.from_pretrained(model)
         self.model = AutoModelForSequenceClassification.from_pretrained(model)
-        self.top_n = top_n
-        
-    def call_rank(self, query, documents):
-        device = torch.device("cuda")
-        self.model.to(device)
+
+        self.model.to(self.device)
         self.model.eval()
 
-        documents_to_rerank = [doc.page_content for doc in documents]
-
-        input_pairs = [[query,doc] for doc in documents_to_rerank]
-
-        inputs = self.tokenizer(input_pairs,
-                         padding=True,
-                         truncation=True,
-                         return_tensors='pt',
-                         max_length=1000)
+        self.top_n = top_n
 
 
-        inputs = {k: v.to(device) for k,v in inputs.items()}
+    def call_rank(self, query, documents):
+
+        texts = [d.page_content for d in documents]
+
+        pairs = [[query, t] for t in texts]
+
+        inputs = self.tokenizer(
+            pairs,
+            padding=True,
+            truncation=True,
+            return_tensors="pt",
+            max_length=512
+        ).to(self.device)
 
         with torch.no_grad():
             scores = self.model(**inputs).logits.squeeze(-1)
 
-        score_list = scores.cpu().numpy().tolist()
+        scored_docs = list(zip(scores.cpu().tolist(), documents))
 
-        results = pd.DataFrame({
-            'documento' : documents_to_rerank,
-            'score_relevancia': score_list
-        })
+        scored_docs.sort(reverse=True, key=lambda x: x[0])
 
-        ranked_results = results.sort_values(by="score_relevancia", ascending= False).head(self.top_n)
+        ranked = [d for _, d in scored_docs[:self.top_n]]
 
-        final_rag_context = '\n'.join(ranked_results['documento'].to_list())
+        print("\n🏆 Reranker ranking:")
+        for s, d in scored_docs[:self.top_n]:
+            print(f"{s:.4f} | {d.metadata}")
 
-        print(ranked_results)
-
-        return final_rag_context
-        
-        
+        return ranked

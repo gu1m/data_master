@@ -11,6 +11,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from llama.memory_support.memory_support import Memory_support
 from llama.RAG.BuildVectorStore import PDFVectorStore
 from llama.RAG.rank_context import RankContext
+from llama.evaluate_response.perplexity import CalculatePerplexity 
 
 
 class call_llama:
@@ -19,53 +20,69 @@ class call_llama:
     e integra com o sistema de memória de longo prazo.
     """
 
+    import os
+from tqdm import tqdm
+import time
+
+# ... (seus imports originais: torch, transformers, etc)
+
+class CallLlama:
     def __init__(self, 
                  model_id: str = "meta-llama/Llama-3.2-3B-Instruct",
                  device_map: str = "cuda",
-                 log_file: str = "logs_llama\llama_logs.jsonl"):
+                 log_file: str = "logs_llama/llama_logs.jsonl"):
 
         print("🚀 Inicializando call_llama...")
 
-        # Caminhos principais
+        # Configurações de caminhos base
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
         self.model_id = model_id
         self.device_map = device_map
         self.log_file = os.path.join(self.base_dir, log_file)
-
-        # Caminho do banco de memória
         self.memory_path = os.path.join(self.base_dir, "memory_support_db")
         os.makedirs(self.memory_path, exist_ok=True)
 
-        # Carregar embeddings (HuggingFace)
-        print("🔍 Carregando modelo de embeddings...")
+        # Definição das etapas de carregamento
+        steps = [
+            {"desc": "🔍 Carregando sistema de Re Rank", "func": self._init_rerank},
+            {"desc": "🧠 Iniciando sistema de memória", "func": self._init_memory},
+            {"desc": "📚 Iniciando sistema de RAG", "func": self._init_rag},
+            {"desc": "⚙️ Carregando modelo Llama local", "func": self.instanciate_llama},
+            {"desc": "📊 Inicializando Answer Evaluation", "func": self._init_perplexity}
+        ]
 
-        # Instanciar o suporte de Re Rank do RAG
-        print(" Carregando sistema de Re Rank...")
-        self.rank_context = RankContext(
-            model = "BAAI/bge-reranker-large"
-        )
+        # Barra de progresso principal
+        with tqdm(total=len(steps), desc="Progresso Geral", bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}") as pbar:
+            for step in steps:
+                pbar.set_description(step["desc"])
+                step["func"]()  # Executa a função de inicialização
+                pbar.update(1)
 
-        # Instanciar suporte de memória (nova API)
-        print("🧠 Iniciando sistema de memória...")
+        print("\n✅ call_llama inicializado com sucesso!")
+
+    # --- Métodos Auxiliares para organizar o código ---
+
+    def _init_rerank(self):
+        self.rank_context = RankContext(model="BAAI/bge-reranker-large")
+
+    def _init_memory(self):
         self.memory_support = Memory_support(
             db_path=self.memory_path,
-            embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2", model_kwargs={'device': 'cuda'}),
-            threshold_distance=0.45,  # ajuste fino recomendado: 0.35–0.55
+            embedding_model=HuggingFaceEmbeddings(
+                model_name="sentence-transformers/all-MiniLM-L6-v2", 
+                model_kwargs={'device': 'cuda'}
+            ),
+            threshold_distance=0.45,
             max_memories=300
         )
 
-        #Instanciar suporte de RAG
-        print("📚 Iniciando sistema de RAG...")
-        self.rag_support = PDFVectorStore(
-            db_path = "llama/RAG/db"
-        )
-        self.db_rag = self.rag_support.load_index()
+    def _init_rag(self):
+        self.rag_support = PDFVectorStore(persist_dir='llama/RAG/db')
+        self.db_rag = self.rag_support._load_db()
 
-        # Carregar modelo Llama
-        print("⚙️ Carregando modelo Llama local (pode levar alguns segundos)...")
-        self.instanciate_llama()
-
-        print("✅ call_llama inicializado com sucesso!")
+    def _init_perplexity(self):
+        # Garante que o modelo e tokenizer já existem antes de chamar
+        self.calculate_perplexity = CalculatePerplexity(model=self.model, tokenizer=self.tokenizer)
 
     # -------------------------------------------------------------------------
     #   LOAD LLAMA
@@ -106,13 +123,7 @@ class call_llama:
 
         reranked_docs = self.rank_context.call_rank(query=user, documents = relevant_chunks)
 
-        count = 0
-        for i in reranked_docs:
-            count +=1 
-            print(f"Chunk num {count}")
-            print(i)
-
-        #print(f"RaGBLOCKKKKK ------- {reranked_docs}")
+        print(f"RaGBLOCKKKKK ------- {reranked_docs}")
 
         return reranked_docs
 
@@ -120,25 +131,31 @@ class call_llama:
     #   MONTA PROMPT E GERA RESPOSTA
     # -------------------------------------------------------------------------
     def build_prompt(self, system: str, user: str):
-        """
-        Structura o prompt com blocos claros, adicionando memória relevante.
-        """
-        memory_block = self.memory_support.mount_prompt_memory(user, k=4)
-        rag_block = self._extract_info_chunks(user, k=20)
 
+        memory_block = self.memory_support.mount_prompt_memory(user, k=4)
+        rag_docs = self._extract_info_chunks(user, k=20)
+    
+        if rag_docs:
+            rag_block = "\n\n".join(
+                f"[FONTE {i}] {d.page_content}"
+                for i, d in enumerate(rag_docs)
+            )
+        else:
+            rag_block = ""
+    
         prompt = f"""
             <|begin_of_text|>
             <|start_header_id|>system<|end_header_id|>
             
-            Você é um **Especialista em GRC-RD (Governança, Risco, Conformidade e Resiliência Digital)**. Sua missão é atuar como um chatbot de alta precisão, fornecendo respostas  **autoritárias e concisas** em **formato de texto coeso (prosa)**.
-            Sua única fonte de verdade é o CONTEXTO RAG fornecido no bloco <CONTEXT_RAG>.
+            Você é um especialista em GRC.
             
-            **REGRAS CRÍTICAS DE GERAÇÃO:**
-            1. **BASE EXCLUSIVA:** Utilize **APENAS** o conteúdo do bloco <CONTEXT_RAG> para formular sua resposta. Não use conhecimento prévio.
-            2. **CITAÇÃO OBRIGATÓRIA:** PARA CADA FRASE OU TRECHO de informação extraído do <CONTEXT_RAG>, inclua a citação completa e formatada imediatamente no final, se não utilizar nada do <CONTEXT_RAG> fale na resposta que não foi utilizado nada do <CONTEXT_RAG>: ****.
-            3. **FORMATO E SÍNTESE:** A resposta deve ser uma **síntese em prosa fluida**, sem repetir cabeçalhos do documento de origem. Responda diretamente à pergunta.
-            4. **INFORMAÇÃO INSUFICIENTE (FALLBACK):** Se a pergunta não puder ser totalmente respondida com o conteúdo do <CONTEXT_RAG>, você **DEVE** parar a geração imediatamente após              a frase de *fallback*.
-            5. **REDUNDANCIA**: NÃO seja redundante na sua resposta, ou seja, ficar repetindo que ja foi falado por você na resposta.
+            REGRAS OBRIGATÓRIAS:
+            
+            1. Use APENAS informações do <CONTEXT_RAG>
+            2. COPIE frases literalmente do contexto
+            3. NÃO reescreva com suas próprias palavras
+            4. Após cada frase inclua [FONTE X]
+            5. Se não houver resposta no contexto, diga: "Informação não encontrada no contexto."
             
             <CONTEXT_MEMORY>
             {memory_block if memory_block.strip() else "[Nenhuma memória relevante encontrada]"}
@@ -155,28 +172,38 @@ class call_llama:
             """
         return prompt
 
+
     # -------------------------------------------------------------------------
     #   INVOCAÇÃO PRINCIPAL
     # -------------------------------------------------------------------------
     def invoke(self, system: str, user: str, temp=0.3, max_tokens=512, top_p=0.95, top_k=40):
+
         prompt = self.build_prompt(system, user)
-
-        #print(prompt)
-
+    
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
-
+    
         with torch.no_grad():
-            output_ids = self.model.generate(
+            outputs = self.model.generate(
                 **inputs,
                 max_new_tokens=max_tokens,
                 temperature=temp,
-                do_sample=True,
+                do_sample=True,   # pode usar sampling agora
                 top_p=top_p,
-                top_k=top_k
+                top_k=top_k,
+                return_dict_in_generate=True
             )
-
-        response = self.tokenizer.decode(output_ids[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
-
+    
+        input_len = inputs["input_ids"].shape[1]
+    
+        generated_ids = outputs.sequences[0][input_len:]
+    
+        response = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
+    
+        pairs, mean_lp, ppl = self.calculate_perplexity.get_logprobs(
+            sequences=outputs.sequences,
+            input_len=input_len
+        )
+        
         # ---- SALVAR NA MEMÓRIA ----
         try:
             self.memory_support.append_on_memory_database(user, response)
@@ -185,5 +212,10 @@ class call_llama:
 
         # ---- LOG ----
         self._log_interaction(system, user, response)
-
+    
+        print("\nPairs logprob x tokens\n", pairs)
+        print(f"\nMean logprob: {mean_lp:.4f}")
+        print(f"Perplexity: {ppl:.4f}")
+    
         return response
+

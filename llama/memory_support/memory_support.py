@@ -28,11 +28,11 @@ class Memory_support:
         self.collection_name = collection_name
 
         # verbose
-        print("\n==========================")
-        print("🧠 Sistema de Memória Iniciando")
-        print("📁 DB Path:", self.db_path)
-        print("📂 Pasta existe:", os.path.isdir(self.db_path))
-        print("==========================\n")
+        # print("\n==========================")
+        # print("🧠 Sistema de Memória Iniciando")
+        # print("📁 DB Path:", self.db_path)
+        # print("📂 Pasta existe:", os.path.isdir(self.db_path))
+        # print("==========================\n")
 
         os.makedirs(self.db_path, exist_ok=True)
 
@@ -45,7 +45,7 @@ class Memory_support:
 
     def _initialize_chroma(self):
 
-        print("🔄 Inicializando/Recriando cliente Chroma PERSISTENTE...")
+        #print("🔄 Inicializando/Recriando cliente Chroma PERSISTENTE...")
         try:
             self.client = chromadb.PersistentClient(path=self.db_path)
             
@@ -53,13 +53,13 @@ class Memory_support:
             self.collection = self.client.get_or_create_collection(name=self.collection_name)
             
             count = self.collection.count()
-            print(f"🟩 Coleção Chroma carregada: {self.collection_name}")
-            print(f"📊 Memórias existentes: {count}")
+            #print(f"🟩 Coleção Chroma carregada: {self.collection_name}")
+            #print(f"📊 Memórias existentes: {count}")
             
             # Listar arquivos para debug
             if os.path.exists(self.db_path):
                 files = os.listdir(self.db_path)
-                print(f"📂 Arquivos no DB: {files}")
+                #print(f"📂 Arquivos no DB: {files}")
                 
         except Exception as e:
             print(f"❌ Falha ao inicializar o ChromaDB: {e}")
