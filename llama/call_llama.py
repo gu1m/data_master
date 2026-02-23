@@ -3,6 +3,7 @@ import os
 import json
 import torch
 import time
+from tqdm import tqdm
 from datetime import datetime
 
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
@@ -12,19 +13,6 @@ from llama.memory_support.memory_support import Memory_support
 from llama.RAG.BuildVectorStore import PDFVectorStore
 from llama.RAG.rank_context import RankContext
 from llama.evaluate_response.perplexity import CalculatePerplexity 
-
-
-class call_llama:
-    """
-    Classe principal que conversa com o modelo Llama local
-    e integra com o sistema de memória de longo prazo.
-    """
-
-    import os
-from tqdm import tqdm
-import time
-
-# ... (seus imports originais: torch, transformers, etc)
 
 class CallLlama:
     def __init__(self, 
@@ -187,7 +175,7 @@ class CallLlama:
                 **inputs,
                 max_new_tokens=max_tokens,
                 temperature=temp,
-                do_sample=True,   # pode usar sampling agora
+                do_sample=True,
                 top_p=top_p,
                 top_k=top_k,
                 return_dict_in_generate=True

@@ -42,23 +42,23 @@ class RAGEvaluator:
     def _semantic_check(self, retrieved: List[str], relevant: List[str], threshold: float = 0.40) -> int:
         if not retrieved or not relevant:
             return 0
-        
-        # Gerar embeddings
-        emb_retrieved = self._get_embeddings(retrieved) # [k, dim]
-        emb_relevant = self._get_embeddings(relevant)   # [n_relevant, dim]
-        
-        # Calcular similaridade de cosseno via produto escalar (já que estão normalizados)
-        # Resultado é uma matriz [k, n_relevant]
-        cos_sim_matrix = torch.mm(emb_retrieved, emb_relevant.t())
-        
-        # Para cada doc recuperado, pegamos a maior similaridade encontrada com qualquer doc relevante
-        max_sim_per_retrieved, _ = torch.max(cos_sim_matrix, dim=1)
-        
-        # Conta quantos documentos recuperados passaram de 0.40 (40%)
-        hits_count = torch.sum(max_sim_per_retrieved >= threshold).item()
+    
+        emb_retrieved = self._get_embeddings(retrieved)   # [k, d]
+        emb_relevant = self._get_embeddings(relevant)     # [r, d]
+    
+        cos_sim_matrix = torch.mm(emb_retrieved, emb_relevant.t())  # [k, r]
+    
+        # 🔥 AQUI ESTÁ A CORREÇÃO
+        # para cada RELEVANTE, pega o melhor retrieved
+        max_sim_per_relevant, _ = torch.max(cos_sim_matrix, dim=0)
+    
+        # conta quantos relevantes foram cobertos
+        hits_count = torch.sum(max_sim_per_relevant >= threshold).item()
+    
         return hits_count
 
-    def evaluate(self, k: int, similarity_threshold: float = 0.40):
+
+    def evaluate(self, k: int, similarity_threshold: float = 0.55):
         hits = 0
         total_recall = 0
         total_precision = 0
@@ -81,9 +81,15 @@ class RAGEvaluator:
             status = "HIT " if hit else "MISS"
             print(f"[{status}] {sample.query} | Matches Semânticos: {tp_count}")
 
+        accuracy = hits / n
+        recall_at_k = total_recall / n
+        precision_at_k = total_precision / n
+
         print("\n" + "="*50)
         print(f"METRICS (BGE-M3 Semantic - Threshold: {similarity_threshold})")
-        print(f"Accuracy   : {hits/n:.3f}")
-        print(f"Recall@k   : {total_recall/n:.3f}")
-        print(f"Precision@k: {total_precision/n:.3f}")
+        print(f"Accuracy   : {accuracy}")
+        print(f"Recall@k   : {recall_at_k}")
+        print(f"Precision@k: {precision_at_k}")
         print("="*50)
+
+        return accuracy, recall_at_k, precision_at_k

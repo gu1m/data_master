@@ -4,12 +4,8 @@ import time
 import uuid
 import gc
 from typing import List, Tuple
-
-# Importações de terceiros
 import chromadb
 from chromadb.config import Settings
-
-# Assumindo que estes estão no mesmo pacote
 from .memory_cleaner import MemoryCleaner
 from .memory_purifier import MemoryPurifier
 

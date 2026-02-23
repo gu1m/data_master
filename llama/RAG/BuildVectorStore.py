@@ -22,7 +22,7 @@ log = logging.getLogger("RAG")
 
 
 # ======================================================
-# VECTOR STORE PERSISTENTE PROFISSIONAL
+# VECTOR STORE PERSISTENTE
 # ======================================================
 
 class PDFVectorStore:
@@ -45,10 +45,6 @@ class PDFVectorStore:
 
         self.db = None
 
-
-    # ==================================================
-    # PUBLIC API
-    # ==================================================
 
     def initialize(self):
         """
