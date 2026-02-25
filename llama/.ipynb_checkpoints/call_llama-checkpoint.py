@@ -12,7 +12,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from llama.memory_support.memory_support import Memory_support
 from llama.RAG.BuildVectorStore import PDFVectorStore
 from llama.RAG.rank_context import RankContext
-from llama.evaluate_response.perplexity import CalculatePerplexity 
+from llama.perplexity import CalculatePerplexity
 
 class CallLlama:
     def __init__(self, 
@@ -144,6 +144,7 @@ class CallLlama:
             3. NÃO reescreva com suas próprias palavras
             4. Após cada frase inclua [FONTE X]
             5. Se não houver resposta no contexto, diga: "Informação não encontrada no contexto."
+            6. Utilize se informado e se estiver pertinente a pergunta informações do <CONTEXT_MEMORY>
             
             <CONTEXT_MEMORY>
             {memory_block if memory_block.strip() else "[Nenhuma memória relevante encontrada]"}
