@@ -42,6 +42,6 @@ class RankContext:
 
         print("\n🏆 Reranker ranking:")
         for s, d in scored_docs[:self.top_n]:
-            print(f"{s:.4f} | {d.metadata}")
+            print(f"{s:.4f} | {d.metadata} | [doc_id: {d.id}]")
 
         return ranked

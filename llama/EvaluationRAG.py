@@ -38,7 +38,7 @@ class RAGEvaluator:
             embeddings = F.normalize(embeddings, p=2, dim=1)
         return embeddings
 
-    def _semantic_check(self, retrieved: List[str], relevant: List[str], threshold: float = 0.40) -> int:
+    def _semantic_check(self, retrieved: List[str], relevant: List[str], threshold: float) -> int:
         if not retrieved or not relevant:
             return 0
     

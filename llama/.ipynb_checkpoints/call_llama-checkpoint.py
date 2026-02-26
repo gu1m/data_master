@@ -57,10 +57,10 @@ class CallLlama:
         self.memory_support = Memory_support(
             db_path=self.memory_path,
             embedding_model=HuggingFaceEmbeddings(
-                model_name="sentence-transformers/all-MiniLM-L6-v2", 
+                model_name="intfloat/multilingual-e5-small", 
                 model_kwargs={'device': 'cuda'}
             ),
-            threshold_distance=0.45,
+            threshold_distance=0.70,
             max_memories=300
         )
 
@@ -95,10 +95,9 @@ class CallLlama:
     # -------------------------------------------------------------------------
     #   LOG INTERAÇÕES
     # -------------------------------------------------------------------------
-    def _log_interaction(self, system, user, response):
+    def _log_interaction(self, user, response):
         log_entry = {
             "timestamp": datetime.now().isoformat(),
-            "system": system,
             "user": user,
             "response": response
         }
@@ -107,73 +106,111 @@ class CallLlama:
 
     def _extract_info_chunks(self, user, k):
 
-        relevant_chunks = self.db_rag.similarity_search(user, k)
+        relevant_chunks = self.db_rag.max_marginal_relevance_search(
+            user, 
+            k=k,        # Quantidade para o Re-ranker analisar
+            fetch_k=50,  # Quantidade que o Chroma analisa internamente
+            lambda_mult=0.20
+        )
 
         reranked_docs = self.rank_context.call_rank(query=user, documents = relevant_chunks)
-
-        print(f"RaGBLOCKKKKK ------- {reranked_docs}")
 
         return reranked_docs
 
     # -------------------------------------------------------------------------
     #   MONTA PROMPT E GERA RESPOSTA
     # -------------------------------------------------------------------------
-    def build_prompt(self, system: str, user: str):
+    def build_prompt(self, user: str):
 
-        memory_block = self.memory_support.mount_prompt_memory(user, k=4)
+        memory_block = self.memory_support.mount_prompt_memory(user, k=3)
         rag_docs = self._extract_info_chunks(user, k=20)
     
         if rag_docs:
             rag_block = "\n\n".join(
-                f"[FONTE {i}] {d.page_content}"
-                for i, d in enumerate(rag_docs)
+                f"[FONTE {d.id}] {d.page_content}"
+                for d in rag_docs
             )
         else:
             rag_block = ""
+
+        print(f"RAG_BLOCK: {rag_block}")
     
-        prompt = f"""
-            <|begin_of_text|>
-            <|start_header_id|>system<|end_header_id|>
-            
-            Você é um especialista em GRC.
-            
-            REGRAS OBRIGATÓRIAS:
-            
-            1. Use APENAS informações do <CONTEXT_RAG>
-            2. COPIE frases literalmente do contexto
-            3. NÃO reescreva com suas próprias palavras
-            4. Após cada frase inclua [FONTE X]
-            5. Se não houver resposta no contexto, diga: "Informação não encontrada no contexto."
-            6. Utilize se informado e se estiver pertinente a pergunta informações do <CONTEXT_MEMORY>
-            
-            <CONTEXT_MEMORY>
-            {memory_block if memory_block.strip() else "[Nenhuma memória relevante encontrada]"}
-            </CONTEXT_MEMORY>
-            
-            <CONTEXT_RAG>
-            {rag_block if rag_block.strip() else "[Nenhum documento relevante foi encontrado.]"}
-            </CONTEXT_RAG>
-            
-            <|end_header_id|>user<|end_header_id|>
-            {user}
-            
-            <|start_header_id|>assistant<|end_header_id|>
-            """
-        return prompt
+        prompt_main = f"""
+        <|begin_of_text|>
+        <|start_header_id|>system<|end_header_id|>
+        
+        Você é um especialista em GRC.
+
+        Construa uma resposta completa e explicativa usando todas as informações relevantes disponíveis.
+        
+        Responda utilizando as informações do <CONTEXT_RAG> como base factual.
+        Use também o <CONTEXT_MEMORY> se complementar a resposta.
+        
+        Não invente fatos que não estejam no contexto.
+        
+        Se múltiplos documentos se complementarem, combine-os.
+        
+        Se não houver informação suficiente:
+        Informação não encontrada no contexto.
+        
+        <CONTEXT_MEMORY>
+        {memory_block if memory_block.strip() else "[Nenhuma memória relevante encontrada]"}
+        </CONTEXT_MEMORY>
+        
+        <CONTEXT_RAG>
+        {rag_block if rag_block.strip() else "[Nenhum documento relevante foi encontrado.]"}
+        </CONTEXT_RAG>
+        
+        <|end_header_id|>
+        <|start_header_id|>user<|end_header_id|>
+        {user}
+        <|end_header_id|>
+        
+        <|start_header_id|>assistant<|end_header_id|>
+        """
+
+        citation_prompt = f"""
+        Use apenas o CONTEXT_RAG abaixo para identificar quais doc_ids sustentam a RESPOSTA.
+        
+        RESPOSTA:
+        answer
+        
+        CONTEXT_RAG:
+        {rag_block}
+        
+        Tarefa:
+        Liste somente as FONTES que contêm informações utilizadas na RESPOSTA.
+        
+        Regras:
+        - Não explique
+        - Não justifique
+        - Não escreva frases
+        - Não escreva texto adicional
+        
+        Exemplo da saída obrigatória:
+        [FONTE: X, Y]
+        
+        Se nenhum doc_id sustentar a resposta:
+        [FONTE: NENHUM]
+        """
+        return prompt_main, citation_prompt
 
 
     # -------------------------------------------------------------------------
     #   INVOCAÇÃO PRINCIPAL
     # -------------------------------------------------------------------------
-    def invoke(self, system: str, user: str, temp=0.3, max_tokens=512, top_p=0.95, top_k=40):
+    def invoke(self, user: str, temp=0.3, max_tokens=512, top_p=0.7, top_k=40):
 
-        prompt = self.build_prompt(system, user)
+        prompt_main, citation_prompt = self.build_prompt(user)
     
-        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+        # =============================
+        # PASSO 1 — GERAR RESPOSTA
+        # =============================
+        inputs_main = self.tokenizer(prompt_main, return_tensors="pt").to(self.model.device)
     
         with torch.no_grad():
-            outputs = self.model.generate(
-                **inputs,
+            outputs_main = self.model.generate(
+                **inputs_main,
                 max_new_tokens=max_tokens,
                 temperature=temp,
                 do_sample=True,
@@ -182,29 +219,55 @@ class CallLlama:
                 return_dict_in_generate=True
             )
     
-        input_len = inputs["input_ids"].shape[1]
+        input_len_main = inputs_main["input_ids"].shape[1]
+        generated_ids_main = outputs_main.sequences[0][input_len_main:]
+        answer = self.tokenizer.decode(generated_ids_main, skip_special_tokens=True)
     
-        generated_ids = outputs.sequences[0][input_len:]
+        # =============================
+        # PASSO 2 — GERAR CITAÇÃO
+        # =============================
+        citation_prompt = citation_prompt.replace("answer", answer)
     
-        response = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
+        inputs_cite = self.tokenizer(citation_prompt, return_tensors="pt").to(self.model.device)
     
+        with torch.no_grad():
+            outputs_cite = self.model.generate(
+                **inputs_cite,
+                max_new_tokens=64,   # curto porque é só attribution
+                #temperature=0.0,     # determinístico = melhor precisão
+                do_sample=True,
+                return_dict_in_generate=True
+            )
+    
+        input_len_cite = inputs_cite["input_ids"].shape[1]
+        generated_ids_cite = outputs_cite.sequences[0][input_len_cite:]
+        citations = self.tokenizer.decode(generated_ids_cite, skip_special_tokens=True)
+    
+        # =============================
+        # JUNTAR
+        # =============================
+        final_response = f"{answer}\n\nBaseado em: {citations}"
+    
+        # =============================
+        # PERPLEXITY (só da resposta)
+        # =============================
         pairs, mean_lp, ppl = self.calculate_perplexity.get_logprobs(
-            sequences=outputs.sequences,
-            input_len=input_len
+            sequences=outputs_main.sequences,
+            input_len=input_len_main
         )
-        
-        # ---- SALVAR NA MEMÓRIA ----
+    
+        # ---- MEMÓRIA ----
         try:
-            self.memory_support.append_on_memory_database(user, response)
+            self.memory_support.append_on_memory_database(user, final_response)
         except Exception as e:
             print(f"⚠️ Erro ao salvar memória: {e}")
-
+    
         # ---- LOG ----
-        self._log_interaction(system, user, response)
+        self._log_interaction(user, final_response)
     
         print("\nPairs logprob x tokens\n", pairs)
         print(f"\nMean logprob: {mean_lp:.4f}")
         print(f"Perplexity: {ppl:.4f}")
     
-        return response
+        return final_response
 
