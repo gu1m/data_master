@@ -27,16 +27,16 @@ class MemoryPurifier:
 
     def rewrite_memory_collection(self, client: Client, collection_name: str, pruned_docs: List[Tuple], embedding_model):
         
-        # 1) delete collection if exists
+        # 1) deletar coleção se existir
         try:
             client.delete_collection(collection_name)
         except Exception:
             pass
 
-        # 2) recreate collection
+        # 2) recriar coleção
         collection = client.get_or_create_collection(name=collection_name)
 
-        # 3) prepare docs, metadatas, ids and embeddings
+        # 3) preparar docs, metadatas, ids e embeddings
         if not pruned_docs:
             return collection
 
@@ -59,7 +59,7 @@ class MemoryPurifier:
             metadatas.append(metadata)
             embeddings_list.append(embedding)
 
-        # compute embeddings if needed
+        # computar embeddings se precisar
         final_embeddings = []
         for i, emb in enumerate(embeddings_list):
             if emb is not None:
@@ -73,7 +73,7 @@ class MemoryPurifier:
             else:
                 final_embeddings.append(None)
 
-        # 4) add to collection (with or without embeddings)
+        # 4) adicionar a coleção (com ou sem o embeddings)
         for attempt in range(self.retry_attempts):
             try:
                 # Verificar se temos embeddings válidos
@@ -98,7 +98,7 @@ class MemoryPurifier:
                 gc.collect()
                 time.sleep(self.retry_wait)
 
-        # final attempt without embeddings
+        # tentativa final sem os embeddings
         try:
             collection.add(documents=docs, metadatas=metadatas, ids=ids)
         except Exception as e:
