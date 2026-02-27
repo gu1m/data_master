@@ -17,9 +17,9 @@ class MemoryCleaner:
 
     def deduplicate(self, items: List[Tuple], embedding_model) -> List[Tuple]:
         """
-        items: list of tuples (id, document_text, metadata, embedding)
-        returns a filtered list with duplicates removed.
-        Semantic duplication is detected via cosine similarity of embeddings.
+        items: lista de tuplas (id, texto_do_documento, metadados, embedding)
+        retorna: uma lista filtrada com duplicatas removidas.
+        A duplicação semântica é detectada por meio da similaridade de cosseno entre os embeddings.
         """
         unique = []
         seen_vectors = []
