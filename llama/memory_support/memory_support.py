@@ -13,7 +13,7 @@ from .memory_purifier import MemoryPurifier
 class Memory_support:
 
     def __init__(self, db_path: str, embedding_model,
-                 threshold_distance: float = 0.65,
+                 threshold_distance: float = 0.70,
                  max_memories: int = 300,
                  collection_name: str = "memory"):
 
