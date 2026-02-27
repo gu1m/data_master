@@ -245,7 +245,7 @@ class Memory_support:
         print("🎯 Memórias encontradas:")
         memory_text = ""
         for doc, dist in zip(docs, distances):
-            if dist is None or dist <= self.threshold_distance:
+            if dist is None or dist >= self.threshold_distance:
                 print(f" - dist {dist:.4f} (INCLUÍDA): {doc[:80]}...")
                 memory_text += doc + "\n"
             else:
