@@ -193,16 +193,16 @@ class PDFVectorStore:
 
     def _normalize(self, text):
 
-        # remove unicode invisível
+        # Normaliza unicode (remove ruído invisível)
         text = unicodedata.normalize("NFKD", text)
     
-        # remove form feed, tabs, etc
+        # Remove caracteres estranhos
         text = text.replace("\x0c", " ")
     
-        # remove hifenização quebrada de PDF
+        # Corrige hifenização quebrada de TXT
         text = re.sub(r"-\s*\n\s*", "", text)
     
-        # remove múltiplos espaços
+        # Remove múltiplos espaços
         text = re.sub(r"\s+", " ", text)
     
         return text.strip().lower()
