@@ -8,7 +8,7 @@ class MemoryCleaner:
     Expects embedding_model to provide embed_query(text) -> vector or embed_documents([text]) -> [vector].
     """
 
-    def __init__(self, min_length: int = 15, similarity_threshold: float = 0.80):
+    def __init__(self, min_length: int = 15, similarity_threshold: float = 0.95):
         self.min_length = min_length
         self.similarity_threshold = similarity_threshold
 
