@@ -13,7 +13,7 @@ from .memory_purifier import MemoryPurifier
 class Memory_support:
 
     def __init__(self, db_path: str, embedding_model,
-                 threshold_distance: float = 0.70,
+                 threshold_distance: float = 0.30, # equivalente a 70 de similariade
                  max_memories: int = 300,
                  collection_name: str = "memory"):
 
@@ -245,7 +245,7 @@ class Memory_support:
         print("🎯 Memórias encontradas:")
         memory_text = ""
         for doc, dist in zip(docs, distances):
-            if dist is None or dist >= self.threshold_distance:
+            if dist is None or dist <= self.threshold_distance:
                 print(f" - dist {dist:.4f} (INCLUÍDA): {doc[:80]}...")
                 memory_text += doc + "\n"
             else:
